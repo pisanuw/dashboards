@@ -1,0 +1,19 @@
+{
+  "name": "netlify-analytics-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local dashboard combining Netlify Web Analytics across all your projects",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "sync": "node src/sync.js",
+    "check": "node src/check.js",
+    "demo": "node src/server.js --demo"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.1"
+  }
+}
