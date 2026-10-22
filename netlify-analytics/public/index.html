@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Netlify Analytics</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Netlify Analytics</h1>
+      <p id="subtitle" class="muted">Loading…</p>
+    </div>
+    <button id="sync" type="button">Sync now</button>
+  </header>
+
+  <main id="main">
+    <div id="empty" class="empty" hidden></div>
+
+    <div id="content" hidden>
+      <section class="filters" aria-label="Filters">
+        <div class="segmented" id="range" role="group" aria-label="Date range"></div>
+        <div class="chips" id="sites" role="group" aria-label="Projects"></div>
+      </section>
+
+      <section class="kpis" id="kpis"></section>
+
+      <section class="card wide">
+        <h2>Pageviews by project</h2>
+        <div class="chart tall"><canvas id="pvChart" aria-label="Pageviews per day stacked by project"></canvas></div>
+      </section>
+
+      <div class="grid2">
+        <section class="card">
+          <h2>Visitors</h2>
+          <p class="note">Sum of each project's daily unique visitors</p>
+          <div class="chart"><canvas id="visChart" aria-label="Visitors per day"></canvas></div>
+        </section>
+        <section class="card">
+          <h2>Bandwidth</h2>
+          <p class="note">&nbsp;</p>
+          <div class="chart"><canvas id="bwChart" aria-label="Bandwidth per day"></canvas></div>
+        </section>
+      </div>
+
+      <section class="card wide">
+        <h2>Projects</h2>
+        <div class="table-wrap"><table id="siteTable"></table></div>
+      </section>
+
+      <h2 class="section-title">Top lists <span class="muted" id="rankNote"></span></h2>
+      <div class="grid2">
+        <section class="card"><h2>Top pages</h2><ol class="rank" id="rankPages"></ol></section>
+        <section class="card"><h2>Top sources</h2><ol class="rank" id="rankSources"></ol></section>
+        <section class="card"><h2>Countries</h2><ol class="rank" id="rankCountries"></ol></section>
+        <section class="card"><h2>Not found (404)</h2><ol class="rank" id="rankNotFound"></ol></section>
+      </div>
+
+      <footer id="notes" class="notes"></footer>
+    </div>
+  </main>
+
+  <script src="/vendor/chart.js"></script>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
