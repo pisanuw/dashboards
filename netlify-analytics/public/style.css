@@ -19,6 +19,14 @@
   --series-6: #008300;
   --series-7: #6250d6;
   --series-8: #e34948;
+  --series-9: #8c0888;
+  --series-10: #895709;
+  --series-11: #9fa5f9;
+  --series-12: #9e122b;
+  --series-13: #b24dc8;
+  --series-14: #85861f;
+  --series-15: #3bacda;
+  --series-16: #5ecb43;
   --series-other: #b5b4ad;
 }
 
@@ -44,6 +52,14 @@
     --series-6: #008300;
     --series-7: #9085e9;
     --series-8: #e66767;
+    --series-9: #9d2398;
+    --series-10: #895709;
+    --series-11: #5449d0;
+    --series-12: #ba022f;
+    --series-13: #c35dd9;
+    --series-14: #85861f;
+    --series-15: #127ca3;
+    --series-16: #3baa18;
     --series-other: #5f5e5a;
   }
 }

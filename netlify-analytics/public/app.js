@@ -9,6 +9,7 @@ const RANGES = [
 ];
 const WEEKLY_AFTER_DAYS = 92;
 const RANK_ROWS = 10;
+const SERIES_COLORS = 16; // --series-1..16 in style.css; extra projects fold into "Other"
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -101,7 +102,7 @@ function buildModel() {
   // Color follows the project, fixed by all-time pageviews so filters never repaint survivors.
   const allTime = (id) => sum(Object.values(daily[id]).map((d) => d.pageviews));
   const ordered = [...allIds].sort((a, b) => allTime(b) - allTime(a));
-  const slots = ordered.length <= 8 ? 8 : 7;
+  const slots = ordered.length <= SERIES_COLORS ? SERIES_COLORS : SERIES_COLORS - 1;
   const colorVar = {};
   ordered.forEach((id, i) => { colorVar[id] = i < slots ? `--series-${i + 1}` : '--series-other'; });
 
@@ -302,7 +303,7 @@ function chart(id, config) {
 function renderCharts(model) {
   const surface = cssVar('--surface-1');
 
-  // Stacked pageviews: one dataset per project; past 8 projects the tail folds into "Other".
+  // Stacked pageviews: one dataset per project; past SERIES_COLORS projects the tail folds into "Other".
   const groups = [];
   const other = new Array(model.buckets.length).fill(0);
   for (const s of model.perSite) {
