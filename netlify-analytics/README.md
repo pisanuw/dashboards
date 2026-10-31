@@ -37,6 +37,21 @@ Run a sync once a day so no day falls outside Netlify's 30-day window. With cron
 On macOS, cron needs Full Disk Access if the repo is under `~/Documents` or `~/Desktop`;
 a launchd agent is the alternative.
 
+## The Projects table
+
+One row per project, one column per analytics feature, sortable by any column (click a
+header, click again to reverse). Numbers sort high-to-low first, text A-Z first, and
+projects with nothing in a column stay at the bottom either way.
+
+| Column | Follows the date range? |
+| --- | --- |
+| Project | n/a |
+| Pageviews, Share, Visitors, Views/visitor, Bandwidth | yes |
+| Top page, Top source, Top country, 404s | no, always the last 30 days (badged `30d`) |
+
+The chosen sort is remembered across reloads, alongside the date range and which projects
+are hidden.
+
 ## Turning Analytics on and off
 
 `npm run analytics -- status` lists every project and whether Analytics is on,
@@ -71,8 +86,10 @@ is a UI trip, so the command says so before it acts.
 - Projects without Analytics enabled are listed at the bottom of the dashboard and skipped.
 - "Visitors" is the sum of each project's daily unique visitors, so one person visiting two
   projects (or on two days) counts twice.
-- Top lists (pages, sources, countries, 404s) always reflect the last 30 days as of the
-  latest sync; the date range filter applies to the charts, totals and project table.
+- Rankings (pages, sources, countries, 404s) always reflect the last 30 days as of the
+  latest sync, because that is all Netlify serves. The date range filter applies to the
+  charts, the totals and the daily metrics in the Projects table; the four ranking columns
+  in that table are badged `30d` and do not follow it.
 
 ## Files
 

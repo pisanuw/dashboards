@@ -12,10 +12,12 @@ const RANK_ROWS = 10;
 const SERIES_COLORS = 16; // --series-1..16 in style.css; extra projects fold into "Other"
 
 const $ = (id) => document.getElementById(id);
+const DEFAULT_SORT = { key: 'pageviews', dir: -1 };
 const state = {
   data: null,
   range: ((r) => (r === 'all' ? Infinity : r))(stored('range', 30)),
   hidden: new Set(stored('hidden', [])),
+  sort: stored('sort', DEFAULT_SORT),
   charts: {},
 };
 
@@ -48,6 +50,8 @@ function el(tag, props = {}, ...children) {
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
+// Highest-count entry of a ranking list, or null when there is nothing in it.
+const topRow = (rows) => (rows || []).reduce((best, r) => (!best || r.count > best.count ? r : best), null);
 const fmtInt = (n) => Math.round(n).toLocaleString();
 function fmtShort(n) {
   const a = Math.abs(n);
@@ -137,15 +141,29 @@ function buildModel() {
     return out;
   };
 
-  const perSite = visible.map((id) => ({
-    id,
-    ...history.sites[id],
-    colorVar: colorVar[id],
-    pageviews: metric(id, 'pageviews', start, today),
-    visitors: metric(id, 'visitors', start, today),
-    bandwidth: metric(id, 'bandwidth', start, today),
-    latest: latest?.sites?.[id],
-  })).sort((a, b) => b.pageviews - a.pageviews);
+  // Sorted by pageviews so the stacked chart's series order is stable; the
+  // Projects table sorts its own copy.
+  const perSite = visible.map((id) => {
+    const pageviews = metric(id, 'pageviews', start, today);
+    const visitors = metric(id, 'visitors', start, today);
+    const site = latest?.sites?.[id];
+    return {
+      id,
+      ...history.sites[id],
+      colorVar: colorVar[id],
+      pageviews,
+      visitors,
+      bandwidth: metric(id, 'bandwidth', start, today),
+      perVisitor: visitors > 0 ? pageviews / visitors : null,
+      // The four ranking fields below come from the last sync's 30-day window,
+      // which is all Netlify serves, so they do not follow the date range.
+      topPage: topRow(site?.pages),
+      topSource: topRow(site?.sources),
+      topCountry: topRow(site?.countries),
+      notFound: site?.notFound ? sum(site.notFound.map((r) => r.count)) : null,
+      latest: site,
+    };
+  }).sort((a, b) => b.pageviews - a.pageviews);
 
   // Previous period of equal length, only when history fully covers it.
   const prevEnd = addDays(start, -1);
@@ -359,29 +377,135 @@ function renderCharts(model) {
   line('bwChart', 'bandwidth', 'Bandwidth', fmtBytes, fmtBytes);
 }
 
-function renderTable(model) {
-  const max = Math.max(1, ...model.perSite.map((s) => s.pageviews));
-  const total = Math.max(1, model.totals.pageviews);
-  const head = el('thead', {}, el('tr', {},
-    el('th', {}, 'Project'),
-    el('th', { class: 'num' }, 'Pageviews'),
-    el('th', { class: 'share' }, 'Share'),
-    el('th', { class: 'num' }, 'Visitors'),
-    el('th', { class: 'num' }, 'Bandwidth'),
-    el('th', {}, 'Top page (30d)')));
-  const rows = model.perSite.map((s) => el('tr', {},
-    el('td', { class: 'name' },
+// A cell for one of the ranking features. `blank` is what an empty resource
+// means for that feature: no source is direct traffic, nothing else has a name.
+function rankCell(row, blank) {
+  if (!row) return el('td', { class: 'trunc' }, el('span', { class: 'muted' }, '—'));
+  const what = row.resource || blank;
+  return el('td', { class: 'trunc', title: `${what} · ${fmtInt(row.count)} in the last 30 days` }, what);
+}
+
+const numCell = (value, fmt) => el('td', { class: 'num' },
+  value == null ? el('span', { class: 'muted' }, '—') : fmt(value));
+
+// One column per analytics feature the sync tracks. `window30` marks the four
+// that come from the latest sync's 30-day rankings, so they cannot follow the
+// date range the way the daily metrics do. `sort` overrides the sort key when
+// the cell shows something other than a plain comparable value.
+const TABLE_COLUMNS = [
+  {
+    key: 'name', label: 'Project', type: 'text',
+    sort: (s) => s.name.toLowerCase(),
+    cell: (s) => el('td', { class: 'name' },
       el('span', { class: 'swatch', style: { background: `var(${s.colorVar})` } }),
       s.url ? el('a', { href: s.url, target: '_blank', rel: 'noopener' }, s.name) : s.name),
-    el('td', { class: 'num' }, fmtInt(s.pageviews)),
-    el('td', { class: 'share', title: `${((s.pageviews / total) * 100).toFixed(1)}%` },
-      el('div', { class: 'share-bar' },
-        el('span', { style: { width: `${(s.pageviews / max) * 100}%`, background: `var(${s.colorVar})` } }))),
-    el('td', { class: 'num' }, fmtInt(s.visitors)),
-    el('td', { class: 'num' }, fmtBytes(s.bandwidth)),
-    el('td', { class: 'top-page' }, s.latest?.pages?.[0]?.resource ?? ''),
-  ));
-  $('siteTable').replaceChildren(head, el('tbody', {}, rows));
+  },
+  {
+    key: 'pageviews', label: 'Pageviews', cls: 'num', type: 'num',
+    cell: (s) => numCell(s.pageviews, fmtInt),
+  },
+  {
+    key: 'share', label: 'Share', cls: 'share', type: 'num',
+    sort: (s) => s.pageviews,
+    cell: (s, { max, total }) => el('td', {
+      class: 'share',
+      title: `${((s.pageviews / total) * 100).toFixed(1)}% of the pageviews shown`,
+    }, el('div', { class: 'share-bar' },
+      el('span', { style: { width: `${(s.pageviews / max) * 100}%`, background: `var(${s.colorVar})` } }))),
+  },
+  {
+    key: 'visitors', label: 'Visitors', cls: 'num', type: 'num',
+    cell: (s) => numCell(s.visitors, fmtInt),
+  },
+  {
+    key: 'perVisitor', label: 'Views/visitor', cls: 'num', type: 'num',
+    cell: (s) => numCell(s.perVisitor, (v) => v.toFixed(1)),
+  },
+  {
+    key: 'bandwidth', label: 'Bandwidth', cls: 'num', type: 'num',
+    cell: (s) => numCell(s.bandwidth, fmtBytes),
+  },
+  {
+    key: 'topPage', label: 'Top page', cls: 'trunc', type: 'text', window30: true,
+    sort: (s) => s.topPage?.resource?.toLowerCase(),
+    cell: (s) => rankCell(s.topPage, '(unnamed)'),
+  },
+  {
+    key: 'topSource', label: 'Top source', cls: 'trunc', type: 'text', window30: true,
+    sort: (s) => (s.topSource ? (s.topSource.resource || 'direct').toLowerCase() : null),
+    cell: (s) => rankCell(s.topSource, '(direct)'),
+  },
+  {
+    key: 'topCountry', label: 'Top country', cls: 'trunc', type: 'text', window30: true,
+    sort: (s) => s.topCountry?.resource?.toLowerCase(),
+    cell: (s) => rankCell(s.topCountry, '(unknown)'),
+  },
+  {
+    key: 'notFound', label: '404s', cls: 'num', type: 'num', window30: true,
+    cell: (s) => numCell(s.notFound, fmtInt),
+  },
+];
+
+const sortValue = (col, s) => (col.sort ? col.sort(s) : s[col.key]);
+const isBlank = (v) => v == null || v === '';
+
+function sortRows(rows, col, dir) {
+  return [...rows].sort((a, b) => {
+    const va = sortValue(col, a);
+    const vb = sortValue(col, b);
+    // Projects with nothing in this column stay at the bottom either way round.
+    if (isBlank(va) || isBlank(vb)) {
+      if (isBlank(va) && isBlank(vb)) return b.pageviews - a.pageviews;
+      return isBlank(va) ? 1 : -1;
+    }
+    const cmp = typeof va === 'number' && typeof vb === 'number'
+      ? va - vb
+      : String(va).localeCompare(String(vb));
+    return cmp * dir || b.pageviews - a.pageviews || a.name.localeCompare(b.name);
+  });
+}
+
+function renderTable(model) {
+  const active = TABLE_COLUMNS.find((c) => c.key === state.sort?.key)
+    || TABLE_COLUMNS.find((c) => c.key === DEFAULT_SORT.key);
+  const dir = state.sort?.dir === 1 ? 1 : -1;
+  const ctx = {
+    max: Math.max(1, ...model.perSite.map((s) => s.pageviews)),
+    total: Math.max(1, model.totals.pageviews),
+  };
+
+  const head = el('tr', {}, ...TABLE_COLUMNS.map((col) => {
+    const on = col === active;
+    return el('th', {
+      scope: 'col',
+      class: [col.cls, on ? 'sorted' : null].filter(Boolean).join(' ') || null,
+      'aria-sort': on ? (dir === 1 ? 'ascending' : 'descending') : 'none',
+    }, el('button', {
+      type: 'button',
+      class: 'sort',
+      title: col.window30
+        ? `${col.label}: last 30 days as of the latest sync, not the selected range`
+        : `Sort by ${col.label.toLowerCase()}`,
+      onclick: () => {
+        // Same column flips direction; a new one starts high-to-low for numbers, A-Z for text.
+        state.sort = on ? { key: col.key, dir: -dir } : { key: col.key, dir: col.type === 'num' ? -1 : 1 };
+        store('sort', state.sort);
+        renderTable(model);
+      },
+    }, col.label,
+      col.window30 ? el('span', { class: 'col-note' }, '30d') : null,
+      el('span', { class: 'arrow', 'aria-hidden': 'true' }, on ? (dir === 1 ? '▲' : '▼') : '')));
+  }));
+
+  const rows = sortRows(model.perSite, active, dir)
+    .map((s) => el('tr', {}, ...TABLE_COLUMNS.map((col) => col.cell(s, ctx))));
+
+  $('siteTable').replaceChildren(el('thead', {}, head), el('tbody', {}, rows));
+
+  const label = RANGES.find((r) => r.days === state.range)?.label ?? `${model.span} days`;
+  $('tableNote').textContent = `One row per project, sortable by any column. Pageviews, share, visitors, `
+    + `views/visitor and bandwidth cover the ${label} range; the columns marked 30d come from the latest `
+    + `sync and do not follow it.`;
 }
 
 function renderRanks(model) {

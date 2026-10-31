@@ -136,7 +136,22 @@ td.num, th.num { text-align: right; }
 td.name { display: flex; align-items: center; gap: 8px; }
 td a { color: var(--text-primary); text-decoration: none; }
 td a:hover { text-decoration: underline; }
-td.top-page { color: var(--text-secondary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+td.trunc { color: var(--text-secondary); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+
+th .sort {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  font: inherit; color: inherit; text-align: inherit;
+  background: none; border: 0; border-radius: 4px; padding: 0; cursor: pointer;
+}
+th .sort:hover { color: var(--text-primary); }
+th .sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+th.sorted .sort { color: var(--text-primary); font-weight: 600; }
+/* Reserve the arrow's width so headers do not shift when the sort moves. */
+th .arrow { font-size: 8px; min-width: 7px; color: var(--accent); }
+th .col-note {
+  font-size: 10px; font-weight: 400; color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 4px; padding: 0 3px;
+}
 .share { width: 120px; }
 .share-bar { height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; }
 .share-bar > span { display: block; height: 100%; border-radius: 3px; }
