@@ -4,6 +4,9 @@
 
 const API = 'https://api.netlify.com/api/v1';
 const ANALYTICS = 'https://analytics.services.netlify.com/v2';
+// Analytics is a per-site add-on: the site has it when a service instance of
+// this slug exists, which is what `analytics_instance_id` on the site points at.
+const ANALYTICS_SERVICE = 'analytics';
 
 export class HttpError extends Error {
   constructor(status, url, body) {
@@ -13,11 +16,16 @@ export class HttpError extends Error {
 }
 
 export function createNetlifyClient(token) {
-  async function get(url) {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  async function send(method, url, body) {
+    const headers = { Authorization: `Bearer ${token}` };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     if (!res.ok) throw new HttpError(res.status, url, await res.text().catch(() => ''));
-    return res.json();
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
   }
+
+  const get = (url) => send('GET', url);
 
   async function listSites() {
     const sites = [];
@@ -31,7 +39,19 @@ export function createNetlifyClient(token) {
       name: s.name,
       url: s.ssl_url || s.url,
       adminUrl: s.admin_url,
+      // null when Analytics is not enabled for the site.
+      analyticsInstanceId: s.analytics_instance_id || null,
     }));
+  }
+
+  // Turns Analytics on for a site. Returns the new service instance.
+  async function enableAnalytics(siteId) {
+    return send('POST', `${API}/sites/${siteId}/services/${ANALYTICS_SERVICE}/instances`, {});
+  }
+
+  // Turns Analytics off by removing the site's service instance.
+  async function disableAnalytics(siteId, instanceId) {
+    return send('DELETE', `${API}/sites/${siteId}/services/${ANALYTICS_SERVICE}/instances/${instanceId}`);
   }
 
   // Returns the `data` field of an analytics response.
@@ -41,5 +61,5 @@ export function createNetlifyClient(token) {
     return body.data;
   }
 
-  return { listSites, analytics };
+  return { listSites, analytics, enableAnalytics, disableAnalytics };
 }

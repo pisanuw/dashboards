@@ -11,6 +11,7 @@
     "start": "node src/server.js",
     "sync": "node src/sync.js",
     "check": "node src/check.js",
+    "analytics": "node src/analytics.js",
     "demo": "node src/server.js --demo"
   },
   "dependencies": {

@@ -12,9 +12,10 @@ console.log(`Sites API: OK, ${sites.length} sites`);
 for (const s of sites) console.log(`  ${s.name}  (${s.id})`);
 
 const wanted = process.argv[2];
-const site = wanted ? sites.find((s) => s.name === wanted) : sites[0];
+// Default to a site that has Analytics on, so a healthy token does not look broken.
+const site = wanted ? sites.find((s) => s.name === wanted) : sites.find((s) => s.analyticsInstanceId) || sites[0];
 if (!site) {
-  console.error(`No site named ${wanted}`);
+  console.error(wanted ? `No site named ${wanted}` : 'No sites in this account');
   process.exit(1);
 }
 
