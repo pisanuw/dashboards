@@ -2,3 +2,9 @@ node_modules/
 .env
 data/
 data-demo/
+
+# Copied in from node_modules by `npm run build` for the static deploy.
+public/vendor/
+
+# Netlify CLI working directories.
+.netlify/

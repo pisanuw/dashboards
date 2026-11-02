@@ -1,11 +1,14 @@
 # Netlify Analytics (all projects)
 
-A local dashboard that combines Netlify Web Analytics across all of your Netlify projects:
+A dashboard that combines Netlify Web Analytics across all of your Netlify projects:
 total pageviews, visitors and bandwidth, a per-project breakdown, and merged top pages,
 sources, countries and 404s.
 
-Netlify only keeps 30 days of analytics. Each sync saves daily numbers to `data/history.json`,
+Netlify only keeps 30 days of analytics. Each sync saves daily numbers to the store,
 so if you sync regularly the dashboard builds up history beyond 30 days (90d / 1y / All).
+
+It runs two ways from the same code: on your laptop against JSON files, or deployed to
+Netlify against Netlify Blobs. See [Deploying](#deploying).
 
 ## Setup
 
@@ -25,17 +28,124 @@ It has full access to your account, so keep `.env` private (it is gitignored).
 **Sync now** button forces one. `npm run demo` runs the dashboard with fake data
 (stored separately in `data-demo/`).
 
+## Deploying
+
+```sh
+netlify sites:create --name <site-name>   # or `netlify link` to an existing one
+netlify env:set NETLIFY_TOKEN      "<personal access token>"
+netlify env:set TZ                 "America/Los_Angeles"
+netlify env:set DASHBOARD_PASSWORD "<something long>"
+netlify env:set CRON_SECRET        "$(openssl rand -hex 32)"
+netlify deploy --build --prod
+npm run seed -- --site-id=<site id>        # copy existing history up (once)
+```
+
+What the deploy consists of:
+
+| Piece | Why |
+| --- | --- |
+| `public/` as a static site | the dashboard has no build step beyond copying Chart.js in |
+| `netlify/functions/data`, `config` | `/api/data` and `/api/config` |
+| `netlify/functions/sync` | the **Sync now** button; answers `202` and hands off |
+| `netlify/functions/sync-background` | the real sync (a background function gets 15 min) |
+| `netlify/functions/scheduled-sync` | the daily cron, which only triggers the above |
+| `netlify/edge-functions/auth` | HTTP Basic auth in front of everything |
+| Netlify Blobs | the store, because no disk survives a deploy |
+
+A full pass over ~75 projects takes around 40 seconds, which is why the work is split:
+a scheduled function is capped at 30 seconds, and a background function at 15 minutes.
+The schedule only fires the trigger.
+
+### Access
+
+A Netlify site is public by default and this one reports traffic for every project in
+the account, so set `DASHBOARD_PASSWORD`. The edge function then asks for HTTP Basic
+auth on every path, including the API and the default `/.netlify/functions/*` URLs.
+Leaving it unset leaves the site open.
+
+On paid Netlify plans, the built-in site password protection is an alternative; the
+edge function works on any plan and needs no dashboard configuration.
+
+`CRON_SECRET` protects the one path the password gate has to let through: the
+background sync, which the scheduler calls with no browser and no password.
+
+### Moving history in and out
+
+```sh
+npm run seed -- --site-id=<id>              # data/ -> Blobs
+npm run seed -- --site-id=<id> --pull       # Blobs -> data/   (backup, or undo a deploy)
+npm run seed -- --site-id=<id> --dry-run    # report, change nothing
+```
+
+It refuses to overwrite a history that has more days than the one replacing it unless
+you add `--force`, since that is almost always a mistake.
+
+## Configuration
+
+Everything is environment variables, listed in `.env.example`. Locally they come from
+`.env`; on Netlify set them with `netlify env:set` (values in `netlify.toml` are
+build-scope only and never reach the functions).
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `NETLIFY_TOKEN` | — | personal access token (`NETLIFY_AUTH_TOKEN` also accepted) |
+| `TZ` | host setting | the zone day boundaries follow — see below |
+| `DASHBOARD_PASSWORD` | unset (open) | HTTP Basic password for the deployed site |
+| `DASHBOARD_USER` | `admin` | the matching username |
+| `CRON_SECRET` | unset | shared secret guarding the background sync |
+| `STORE` | `file`, `blobs` on Netlify | where the two documents live |
+| `BLOBS_STORE` | `netlify-analytics` | blob store name |
+| `DATA_DIR` | `data` | directory for the `file` store |
+| `PORT` / `HOST` | `3000` / `127.0.0.1` | local server |
+| `SYNC_DAYS` | `30` | days requested per sync (Netlify serves at most 30) |
+| `STALE_MINUTES` | `60` | re-sync on start when the last one is older than this |
+| `CONCURRENCY` | `4` | projects fetched at once; each costs 8 requests |
+| `RANKING_LIMIT` | `100` | rows kept per ranking |
+| `SITE_INCLUDE` / `SITE_EXCLUDE` | unset / unset | which projects to sync |
+| `DASHBOARD_TITLE` | `Netlify Analytics` | page heading |
+| `DASHBOARD_RANGES` | `7,30,90,365,0` | date-range buttons, in days; `0` is "all" |
+| `DASHBOARD_DEFAULT_RANGE` | `30` | which one is selected first |
+| `DASHBOARD_RANK_ROWS` | `10` | rows per top-list card |
+| `DASHBOARD_WEEKLY_AFTER_DAYS` | `92` | span past which daily points group into weeks |
+
+`SITE_INCLUDE` and `SITE_EXCLUDE` are comma-separated name patterns, case-insensitive,
+with `*` as a wildcard. An empty `SITE_INCLUDE` means every project; `SITE_EXCLUDE`
+wins over `SITE_INCLUDE`. Filtering happens before any analytics request, so excluded
+projects cost nothing.
+
+```sh
+SITE_EXCLUDE='test-*,*-scratch' npm run sync
+```
+
+### Time zones
+
+A "day" is a local-time day, and the zone decides which day a pageview lands in. Left
+alone, that is whatever zone the machine is in — which changes when a laptop travels,
+and is UTC on Netlify. Pin `TZ` so a day keeps meaning the same thing:
+
+```sh
+netlify env:set TZ America/Los_Angeles
+```
+
+The dashboard footer names the zone in use, and says so when your browser is in a
+different one. Days recorded before `TZ` was pinned keep whatever boundaries they were
+collected with.
+
 ## Keeping history
 
-Run a sync once a day so no day falls outside Netlify's 30-day window. With cron
-(`crontab -e`), adjusting the paths:
+Deployed, `netlify/functions/scheduled-sync` runs daily; change the cadence in
+`netlify.toml` under `[functions."scheduled-sync"]`.
+
+Locally, run a sync once a day so no day falls outside Netlify's 30-day window. With
+cron (`crontab -e`), adjusting the paths:
 
 ```
 15 8 * * * cd /path/to/dashboards/netlify-analytics && /usr/local/bin/node src/sync.js >> data/sync.log 2>&1
 ```
 
 On macOS, cron needs Full Disk Access if the repo is under `~/Documents` or `~/Desktop`;
-a launchd agent is the alternative.
+a launchd agent is the alternative. Running both the local cron and the deployed
+schedule is harmless but pointless — they write to different stores.
 
 ## The Projects table
 
@@ -95,10 +205,17 @@ is a UI trip, so the command says so before it acts.
 
 | Path | Purpose |
 | --- | --- |
+| `src/config.js` | Every setting, read from the environment |
+| `src/store.js` | Where the data lives: JSON files or Netlify Blobs |
+| `src/api.js` | The API itself, independent of how it is served |
 | `src/netlify.js` | API client (sites + analytics) |
-| `src/sync.js` | Fetches every project, merges into `data/` (`npm run sync`) |
-| `src/server.js` | Local server: dashboard + `/api/data` + `/api/sync` |
+| `src/sync.js` | Fetches every project and merges into the store (`npm run sync`) |
+| `src/server.js` | Local server: dashboard + `/api/*` |
 | `src/check.js` | Token / API sanity check |
-| `src/analytics.js` | Reports / changes which projects have Analytics on (`npm run analytics`) |
+| `src/analytics.js` | Reports / changes which projects have Analytics on |
 | `src/mock.js` | Fake data for `npm run demo` |
+| `scripts/build.mjs` | Copies Chart.js into `public/vendor/` for the static deploy |
+| `scripts/seed.mjs` | Moves history between `data/` and Blobs |
+| `netlify/functions/` | The deployed API and the scheduled sync |
+| `netlify/edge-functions/auth.js` | Basic auth in front of the site |
 | `public/` | Dashboard (Chart.js, no build step) |

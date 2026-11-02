@@ -1,21 +1,53 @@
 /* global Chart */
 
-const RANGES = [
-  { days: 7, label: '7d' },
-  { days: 30, label: '30d' },
-  { days: 90, label: '90d' },
-  { days: 365, label: '1y' },
-  { days: Infinity, label: 'All' },
-];
-const WEEKLY_AFTER_DAYS = 92;
-const RANK_ROWS = 10;
 const SERIES_COLORS = 16; // --series-1..16 in style.css; extra projects fold into "Other"
+
+// Everything below comes from /api/config, which the server builds from
+// environment variables. These are the values used if that call fails, so the
+// dashboard still renders rather than showing nothing.
+const FALLBACK_CONFIG = {
+  title: 'Netlify Analytics',
+  ranges: [7, 30, 90, 365, 0],
+  defaultRange: 30,
+  rankRows: 10,
+  weeklyAfterDays: 92,
+  timezone: '',
+};
+
+// A range of 0 days means "everything we have".
+function rangeLabel(days) {
+  if (!Number.isFinite(days)) return 'All';
+  if (days % 365 === 0) return `${days / 365}y`;
+  return `${days}d`;
+}
+const toDays = (n) => (Number(n) > 0 ? Number(n) : Infinity);
+
+let CONFIG = FALLBACK_CONFIG;
+let RANGES = [];
+let RANK_ROWS = FALLBACK_CONFIG.rankRows;
+let WEEKLY_AFTER_DAYS = FALLBACK_CONFIG.weeklyAfterDays;
+
+function applyConfig(cfg) {
+  CONFIG = { ...FALLBACK_CONFIG, ...cfg };
+  RANGES = CONFIG.ranges.map((d) => ({ days: toDays(d), label: rangeLabel(toDays(d)) }));
+  if (!RANGES.length) RANGES = FALLBACK_CONFIG.ranges.map((d) => ({ days: toDays(d), label: rangeLabel(toDays(d)) }));
+  RANK_ROWS = CONFIG.rankRows;
+  WEEKLY_AFTER_DAYS = CONFIG.weeklyAfterDays;
+
+  document.title = CONFIG.title;
+  $('title').textContent = CONFIG.title;
+
+  // A stored range from a previous visit only counts if it is still offered.
+  const saved = ((r) => (r === 'all' ? Infinity : r))(stored('range', null));
+  const offered = RANGES.map((r) => r.days);
+  state.range = offered.includes(saved) ? saved : (offered.includes(toDays(CONFIG.defaultRange)) ? toDays(CONFIG.defaultRange) : offered[0]);
+}
 
 const $ = (id) => document.getElementById(id);
 const DEFAULT_SORT = { key: 'pageviews', dir: -1 };
 const state = {
   data: null,
-  range: ((r) => (r === 'all' ? Infinity : r))(stored('range', 30)),
+  range: 30,
   hidden: new Set(stored('hidden', [])),
   sort: stored('sort', DEFAULT_SORT),
   charts: {},
@@ -553,6 +585,16 @@ function renderNotes(model) {
   if (model.earliest > addDays(keyOf(new Date()), -(state.range - 1)) && Number.isFinite(state.range)) {
     notes.push(`History starts ${fmtDay(model.earliest)}. Netlify keeps 30 days, so longer ranges fill in as daily syncs accumulate.`);
   }
+  if (CONFIG.timezone) {
+    const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // Worth saying only when the two disagree: that is when a "day" on this
+    // screen and a "day" in the stored data are different spans of time.
+    if (here !== CONFIG.timezone) {
+      notes.push(`Days are counted in ${CONFIG.timezone}${CONFIG.timezonePinned ? '' : ' (the server\u2019s own setting, not pinned)'}; your browser is in ${here}.`);
+    } else if (!CONFIG.timezonePinned) {
+      notes.push(`Days are counted in ${CONFIG.timezone}, the server\u2019s own setting. Pin TZ to keep that stable across machines.`);
+    }
+  }
   if (skipped.length) notes.push(`No analytics data (Analytics not enabled?): ${skipped.join(', ')}`);
   for (const e of errors) notes.push(`Error syncing ${e.name}: ${e.error}`);
   $('notes').replaceChildren(...notes.map((n) => el('p', {}, n)));
@@ -587,20 +629,45 @@ function render() {
 
 async function load() {
   const res = await fetch('/api/data');
+  if (!res.ok) throw new Error(`/api/data returned HTTP ${res.status}`);
   state.data = await res.json();
   render();
   if (state.data.syncing) setTimeout(load, 3000);
 }
 
+// Deployed, a sync runs as a background job that outlives the request, so the
+// answer comes back before the work is done. Watch for syncedAt to move
+// instead. Locally the request already blocks until the sync finishes.
+const SYNC_POLL_MS = 3000;
+const SYNC_TIMEOUT_MS = 15 * 60 * 1000; // The platform's own ceiling for the job.
+
+async function waitForSync(before) {
+  const deadline = Date.now() + SYNC_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, SYNC_POLL_MS));
+    await load();
+    if (state.data.latest?.syncedAt !== before) return true;
+  }
+  return false;
+}
+
 $('sync').addEventListener('click', async () => {
   const button = $('sync');
+  const before = state.data?.latest?.syncedAt;
   button.disabled = true;
   button.textContent = 'Syncing…';
   $('main').classList.add('busy');
   try {
     const res = await fetch('/api/sync', { method: 'POST' });
-    if (!res.ok) throw new Error((await res.json()).error);
-    await load();
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok && res.status !== 202) throw new Error(body.error || `HTTP ${res.status}`);
+    if (body.async) {
+      if (!(await waitForSync(before))) {
+        alert('Sync is taking longer than expected. It may still finish — reload in a few minutes.');
+      }
+    } else {
+      await load();
+    }
   } catch (err) {
     alert(`Sync failed: ${err.message}`);
   } finally {
@@ -612,4 +679,21 @@ $('sync').addEventListener('click', async () => {
 
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => state.data && render());
 
-load();
+async function start() {
+  try {
+    const res = await fetch('/api/config');
+    applyConfig(res.ok ? await res.json() : {});
+  } catch {
+    applyConfig({});
+  }
+  try {
+    await load();
+  } catch (err) {
+    $('content').hidden = true;
+    $('empty').hidden = false;
+    $('empty').textContent = `Could not load data: ${err.message}`;
+    $('subtitle').textContent = '';
+  }
+}
+
+start();

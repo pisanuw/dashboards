@@ -1,0 +1,38 @@
+# Deployment for the Netlify Analytics dashboard.
+#
+# Secrets and anything that differs per site (NETLIFY_TOKEN, CRON_SECRET,
+# DASHBOARD_PASSWORD, TZ) are set as site environment variables, not here:
+# values in this file live in a public repo, and [build.environment] is
+# build-scope only, so functions would not see them at runtime anyway.
+#
+#   netlify env:set TZ America/Los_Angeles
+#
+# See .env.example for the full list.
+
+[build]
+  publish = "public"
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# A full pass over the account takes well over the 30s a scheduled function
+# gets, so the schedule only kicks off the background function (15 minutes).
+[functions."scheduled-sync"]
+  schedule = "@daily"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    X-Frame-Options = "DENY"
+
+[[headers]]
+  for = "/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"

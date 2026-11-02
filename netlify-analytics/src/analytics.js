@@ -174,5 +174,10 @@ export async function run(argv, { client, log = console.log } = {}) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exitCode = await run(process.argv.slice(2));
+  try {
+    process.exitCode = await run(process.argv.slice(2));
+  } catch (err) {
+    console.error(err.message);
+    process.exitCode = 1;
+  }
 }

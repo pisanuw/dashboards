@@ -1,42 +1,24 @@
-// Pulls analytics for every Netlify project and merges it into the local store.
+// Pulls analytics for every selected Netlify project and merges it into the store.
 //
-// data/history.json  daily pageviews/visitors/bandwidth per site, kept forever
-//                    (Netlify only shows 30 days, so history builds up over time)
-// data/latest.json   rankings (top pages, sources, ...) from the most recent sync
+//   history  daily pageviews/visitors/bandwidth per site, kept forever
+//            (Netlify only shows 30 days, so history builds up over time)
+//   latest   rankings (top pages, sources, ...) from the most recent sync
+//
+// See src/store.js for where those two documents actually live.
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DATA_DIR, DEMO, SYNC_DAYS, getToken } from './config.js';
+import { CONCURRENCY, DEMO, RANKING_LIMIT, SYNC_DAYS, getToken, selectSites } from './config.js';
+import { createStore } from './store.js';
 import { createNetlifyClient } from './netlify.js';
 import { createMockClient } from './mock.js';
 
 const DAY = 86_400_000;
-const RANKING_LIMIT = 100;
-const CONCURRENCY = 4;
+
+export const EMPTY_HISTORY = { sites: {}, daily: {} };
 
 export function createClient() {
   return DEMO ? createMockClient() : createNetlifyClient(getToken());
 }
-
-export async function readJson(file, fallback) {
-  try {
-    return JSON.parse(await fs.readFile(file, 'utf8'));
-  } catch (err) {
-    if (err.code === 'ENOENT') return fallback;
-    throw err;
-  }
-}
-
-async function writeJson(file, value) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(value));
-  await fs.rename(tmp, file);
-}
-
-export const historyFile = () => path.join(DATA_DIR, 'history.json');
-export const latestFile = () => path.join(DATA_DIR, 'latest.json');
 
 // Local UTC offset in the "+HHMM" form the analytics API expects.
 export function tzOffset(date = new Date()) {
@@ -72,15 +54,16 @@ function seriesByDate(data, valueKey = 'count') {
 async function fetchSite(client, siteId, window) {
   const { from, to, timezone } = window;
   const q = (extra) => ({ from, to, timezone, ...extra });
+  const limit = RANKING_LIMIT;
   const [pageviews, visitors, bandwidth, uniques, pages, sources, countries, notFound] = await Promise.all([
     client.analytics(siteId, 'pageviews', q({ resolution: 'day' })),
     client.analytics(siteId, 'visitors', q({ resolution: 'day' })),
     client.analytics(siteId, 'bandwidth', q({ resolution: 'day' })),
     client.analytics(siteId, 'visitors', q({ resolution: 'range' })),
-    client.analytics(siteId, 'ranking/pages', q({ limit: RANKING_LIMIT })),
-    client.analytics(siteId, 'ranking/sources', q({ limit: RANKING_LIMIT })),
-    client.analytics(siteId, 'ranking/countries', q({ limit: RANKING_LIMIT })),
-    client.analytics(siteId, 'ranking/not_found', q({ limit: RANKING_LIMIT })),
+    client.analytics(siteId, 'ranking/pages', q({ limit })),
+    client.analytics(siteId, 'ranking/sources', q({ limit })),
+    client.analytics(siteId, 'ranking/countries', q({ limit })),
+    client.analytics(siteId, 'ranking/not_found', q({ limit })),
   ]);
 
   const pv = seriesByDate(pageviews);
@@ -104,22 +87,32 @@ async function fetchSite(client, siteId, window) {
 
 async function mapLimit(items, limit, fn) {
   const queue = [...items];
-  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, queue.length)) }, async () => {
     while (queue.length) await fn(queue.shift());
   });
   await Promise.all(workers);
 }
 
-export async function sync({ client = createClient(), days = SYNC_DAYS, log = console.log } = {}) {
+export async function sync({
+  client = createClient(),
+  store,
+  days = SYNC_DAYS,
+  log = console.log,
+} = {}) {
+  const target = store ?? (await createStore());
   const now = new Date();
   const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
   const window = { from: startOfToday.getTime() - (days - 1) * DAY, to: now.getTime(), timezone: tzOffset(now) };
 
-  const sites = await client.listSites();
-  log(`Syncing ${sites.length} sites (last ${days} days)...`);
+  const all = await client.listSites();
+  const sites = selectSites(all);
+  const skipped = all.length - sites.length;
+  log(`Syncing ${sites.length} sites (last ${days} days)${skipped ? `, ${skipped} filtered out` : ''}...`);
 
-  const history = await readJson(historyFile(), { sites: {}, daily: {} });
+  const history = await target.read('history', EMPTY_HISTORY);
+  history.sites ??= {};
+  history.daily ??= {};
   const latest = { syncedAt: now.toISOString(), from: window.from, to: window.to, days, sites: {} };
 
   await mapLimit(sites, CONCURRENCY, async (site) => {
@@ -139,11 +132,11 @@ export async function sync({ client = createClient(), days = SYNC_DAYS, log = co
     }
   });
 
-  await writeJson(historyFile(), history);
-  await writeJson(latestFile(), latest);
+  await target.write('history', history);
+  await target.write('latest', latest);
 
   const ok = Object.values(latest.sites).filter((s) => s.status === 'ok').length;
-  log(`Done: ${ok}/${sites.length} sites with analytics. Data in ${DATA_DIR}`);
+  log(`Done: ${ok}/${sites.length} sites with analytics. Data in ${target.describe()}`);
   return latest;
 }
 
