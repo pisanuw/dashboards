@@ -20,10 +20,9 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# A full pass over the account takes well over the 30s a scheduled function
-# gets, so the schedule only kicks off the background function (15 minutes).
-[functions."scheduled-sync"]
-  schedule = "@daily"
+# The sync schedule lives in netlify/functions/scheduled-sync.mjs, not here:
+# a function's own `export const config` overrides this file, so declaring it
+# in both only creates a version that silently loses.
 
 [[headers]]
   for = "/*"

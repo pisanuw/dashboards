@@ -7,7 +7,12 @@ import { createStore } from '../../src/store.js';
 import { cronSecretOk, json } from '../lib/shared.mjs';
 
 export default async (req) => {
-  if (!cronSecretOk(req)) return json({ error: 'forbidden' }, 403);
+  // The caller has already been told 202 by the platform; this 403 only ends
+  // the run and shows up in the logs. Stopping the work is the point.
+  if (!cronSecretOk(req)) {
+    console.warn('Background sync refused: missing or wrong CRON_SECRET.');
+    return json({ error: 'forbidden' }, 403);
+  }
   const store = await createStore();
   const latest = await runSync({ store });
   const ok = Object.values(latest.sites).filter((s) => s.status === 'ok').length;

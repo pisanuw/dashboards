@@ -32,7 +32,14 @@ const num = (name, fallback) => {
 const list = (name) => str(name).split(',').map((s) => s.trim()).filter(Boolean);
 
 // True when running inside a Netlify build or function.
-export const ON_NETLIFY = Boolean(process.env.NETLIFY || process.env.NETLIFY_DEV);
+//
+// NETLIFY is set during builds but NOT in the functions runtime, so testing it
+// alone makes a deployed function quietly fall back to the file store and read
+// a disk that holds nothing. NETLIFY_BLOBS_CONTEXT is the runtime signal, and
+// it is exactly the capability being detected.
+export const ON_NETLIFY = Boolean(
+  process.env.NETLIFY || process.env.NETLIFY_DEV || process.env.NETLIFY_BLOBS_CONTEXT,
+);
 
 export const DEMO = process.argv.includes('--demo') || process.env.DEMO === '1';
 

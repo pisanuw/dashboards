@@ -12,6 +12,12 @@ export const json = (body, status = 200) =>
 // deliberately does not cover (the scheduler is not a browser and has no
 // password). A shared secret is what keeps it from being a free "run this
 // expensive job" button for anyone who guesses the path.
+//
+// Note what this can and cannot do. Netlify answers 202 the moment a
+// background function is invoked, before any of its code runs, so a caller
+// without the secret still sees 202 and the function's own 403 reaches nobody.
+// What the check stops is the work: no API calls, no writes. Invoking it
+// remains possible; accomplishing anything with it does not.
 export function cronSecretOk(req) {
   if (!CRON_SECRET) return true; // Nothing configured: nothing to check.
   const header = req.headers.get('x-cron-secret') || '';
@@ -35,6 +41,9 @@ export async function triggerBackgroundSync(req) {
     method: 'POST',
     headers: CRON_SECRET ? { 'x-cron-secret': CRON_SECRET } : {},
   });
+  // 202 means "accepted for execution", not "it worked" -- the job's own
+  // result lands in the function logs, and in latest.syncedAt. Anything else
+  // means the invocation itself failed, which is worth reporting.
   if (!res.ok && res.status !== 202) {
     throw new Error(`Could not start background sync: HTTP ${res.status}`);
   }

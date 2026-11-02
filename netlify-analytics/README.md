@@ -69,6 +69,13 @@ edge function works on any plan and needs no dashboard configuration.
 `CRON_SECRET` protects the one path the password gate has to let through: the
 background sync, which the scheduler calls with no browser and no password.
 
+One wrinkle worth knowing: Netlify answers `202` the moment a background
+function is invoked, before any of its code runs. A caller without the secret
+still sees `202`, and the function's `403` never reaches them. The secret stops
+the *work* -- no API calls, no writes, and a refusal in the function logs --
+not the invocation. Triggering an empty run stays possible; achieving anything
+with it does not.
+
 ### Moving history in and out
 
 ```sh
@@ -133,8 +140,12 @@ collected with.
 
 ## Keeping history
 
-Deployed, `netlify/functions/scheduled-sync` runs daily; change the cadence in
-`netlify.toml` under `[functions."scheduled-sync"]`.
+Deployed, `netlify/functions/scheduled-sync` runs daily at 08:15 UTC, which is
+just past midnight in `America/Los_Angeles` so each run sees a complete previous
+day. Cron is always UTC, so this is the one setting that has to be changed by
+hand when `TZ` changes, in `netlify/functions/scheduled-sync.mjs`. (A function's
+own `export const config` overrides `netlify.toml`, so the schedule is declared
+only there.)
 
 Locally, run a sync once a day so no day falls outside Netlify's 30-day window. With
 cron (`crontab -e`), adjusting the paths:
