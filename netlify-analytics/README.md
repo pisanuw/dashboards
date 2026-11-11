@@ -87,6 +87,64 @@ npm run seed -- --site-id=<id> --dry-run    # report, change nothing
 It refuses to overwrite a history that has more days than the one replacing it unless
 you add `--force`, since that is almost always a mistake.
 
+## Exporting
+
+Every number the dashboard shows can be taken out as JSON, from the page or from
+the command line.
+
+In the browser, **Download** (next to *Sync now*) offers three files:
+
+| Item | What is in it |
+| --- | --- |
+| Statistics | the whole dashboard for the range and projects currently shown |
+| History (raw) | `history.json` as stored: daily figures per project, every day synced |
+| Last sync (raw) | `latest.json` as stored: the rankings Netlify returned at the last sync |
+
+The statistics file follows the view it was taken from, so switching to `7d` or
+hiding a project changes what you get, and the totals in the file are the ones
+on the tiles. It is built in the page from data already loaded, so it works on
+the deployed site too.
+
+From the command line:
+
+```sh
+npm run export                       # all history -> data/exports/
+npm run export -- --range=30         # a date range, in days ("all" is the default)
+npm run export -- --out=/tmp/x       # somewhere else
+npm run export -- --stdout | jq .    # to stdout, for piping
+npm run export -- --compact          # no indentation
+```
+
+The default output directory is inside `DATA_DIR`, which is gitignored: an
+export is traffic data for every project in the account and this repo is public.
+
+Both routes go through `public/stats.js`, the same module the page renders
+from, so an export and the screen it describes cannot drift apart. The document
+looks like this:
+
+```jsonc
+{
+  "format": "netlify-analytics-export/1",
+  "generatedAt": "...",
+  "source":     { "syncedAt": "...", "timezone": "...", "rankingWindowDays": 30 },
+  "range":      { "label": "30d", "start": "...", "end": "...", "days": 30 },
+  "filters":    { "projectsIncluded": 65, "projectsHidden": [] },
+  "totals":     { "pageviews": 0, "visitors": 0, "bandwidth": 0, "projectsWithTraffic": 0 },
+  "previousPeriod": { "pageviews": 0, "changePercent": { "pageviews": 0 } },
+  "daily":      [ { "date": "2026-11-02", "pageviews": 0, "visitors": 0, "bandwidth": 0 } ],
+  "projects":   [ { "name": "...", "pageviews": 0, "sharePercent": 0,
+                    "daily": [ ... ], "rankings": { "pages": [], "sources": [] } } ],
+  "rankings":   { "pages": [], "sources": [], "countries": [], "notFound": [] },
+  "excluded":   { "noAnalytics": [ "..." ], "errors": [] }
+}
+```
+
+`daily` is dense -- every day in the range for every project, zeros included --
+so rows line up without a join. `rankings` is always the last 30 days as of the
+latest sync, flagged by `source.rankingWindowDays`, and never follows the range.
+Projects whose Analytics has since been turned off still appear with their
+stored history, marked `"status": "no-analytics"` and with no rankings.
+
 ## Configuration
 
 Everything is environment variables, listed in `.env.example`. Locally they come from
@@ -219,6 +277,7 @@ is a UI trip, so the command says so before it acts.
 | `src/config.js` | Every setting, read from the environment |
 | `src/store.js` | Where the data lives: JSON files or Netlify Blobs |
 | `src/api.js` | The API itself, independent of how it is served |
+| `src/export.js` | Builds the JSON export (`npm run export`) |
 | `src/netlify.js` | API client (sites + analytics) |
 | `src/sync.js` | Fetches every project and merges into the store (`npm run sync`) |
 | `src/server.js` | Local server: dashboard + `/api/*` |
@@ -229,4 +288,5 @@ is a UI trip, so the command says so before it acts.
 | `scripts/seed.mjs` | Moves history between `data/` and Blobs |
 | `netlify/functions/` | The deployed API and the scheduled sync |
 | `netlify/edge-functions/auth.js` | Basic auth in front of the site |
+| `public/stats.js` | The statistics, shared by the page and the export |
 | `public/` | Dashboard (Chart.js, no build step) |

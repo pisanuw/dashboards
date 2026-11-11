@@ -15,6 +15,7 @@
     "check": "node src/check.js",
     "analytics": "node src/analytics.js",
     "demo": "node src/server.js --demo",
+    "export": "node src/export.js",
     "seed": "node scripts/seed.mjs"
   },
   "dependencies": {

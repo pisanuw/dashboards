@@ -92,6 +92,33 @@ button {
 button:hover { border-color: var(--baseline); }
 button:disabled { opacity: 0.6; cursor: progress; }
 
+.actions { display: flex; align-items: center; gap: 8px; }
+
+/* The download menu is a plain <details>, so open/closed is the browser's
+   business rather than another piece of state for app.js to track. */
+.menu { position: relative; }
+.menu > summary {
+  display: inline-block; list-style: none; white-space: nowrap;
+  font: inherit; color: var(--text-primary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+}
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary::after { content: " \25be"; color: var(--text-muted); font-size: 10px; }
+.menu > summary:hover, .menu[open] > summary { border-color: var(--baseline); }
+.menu-body {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 10;
+  width: 330px; max-width: calc(100vw - 32px);
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+  padding: 6px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+.menu-body button {
+  display: block; width: 100%; text-align: left; white-space: normal;
+  background: none; border: 0; border-radius: 8px; padding: 8px 10px;
+}
+.menu-body button:hover { background: var(--grid); border-color: transparent; }
+.menu-label { display: block; font-weight: 600; }
+.menu-note { display: block; color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
 main { max-width: 1200px; margin: 0 auto; padding: 8px 16px 40px; transition: opacity 0.2s; }
 main.busy { opacity: 0.5; }
 

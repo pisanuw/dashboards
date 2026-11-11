@@ -12,3 +12,7 @@
 2026-11-02 [note] A background function's 202 is the platform acknowledging the invocation, before any code runs, so CRON_SECRET stops the work but not the invocation; verified over 90s that an unauthorized call writes nothing.
 2026-11-02 [decision] Sync schedule is 15 8 * * * (UTC), just past LA midnight so each run sees a complete day, declared only in netlify/functions/scheduled-sync.mjs because a function's own config overrides netlify.toml.
 2026-11-02 [code] Added /api/health reporting the store backend, keys and zone the deployed function actually sees.
+
+2026-11-02 [code] Statistics export as JSON: `npm run export` writes to data/exports/, and a Download button in the dashboard saves the same document plus the two raw store files.
+2026-11-02 [decision] The export's numbers come from public/stats.js, extracted out of app.js's buildModel so the page and the export compute them once; a second implementation would drift from the screen it claims to describe.
+2026-11-02 [note] Exports default into DATA_DIR, which is gitignored: they carry traffic data for every project in the account and the repo is public.

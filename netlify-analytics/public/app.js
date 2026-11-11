@@ -1,6 +1,10 @@
 /* global Chart */
 
-const SERIES_COLORS = 16; // --series-1..16 in style.css; extra projects fold into "Other"
+// The numbers themselves live in stats.js, which src/export.js imports too, so
+// a downloaded export and the screen it was taken from cannot disagree.
+import {
+  addDays, buildExport, buildModel, keyOf, parseKey, rangeLabel, sum, toDays,
+} from './stats.js';
 
 // Everything below comes from /api/config, which the server builds from
 // environment variables. These are the values used if that call fails, so the
@@ -13,14 +17,6 @@ const FALLBACK_CONFIG = {
   weeklyAfterDays: 92,
   timezone: '',
 };
-
-// A range of 0 days means "everything we have".
-function rangeLabel(days) {
-  if (!Number.isFinite(days)) return 'All';
-  if (days % 365 === 0) return `${days / 365}y`;
-  return `${days}d`;
-}
-const toDays = (n) => (Number(n) > 0 ? Number(n) : Infinity);
 
 let CONFIG = FALLBACK_CONFIG;
 let RANGES = [];
@@ -81,9 +77,6 @@ function el(tag, props = {}, ...children) {
 }
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const sum = (xs) => xs.reduce((a, b) => a + b, 0);
-// Highest-count entry of a ranking list, or null when there is nothing in it.
-const topRow = (rows) => (rows || []).reduce((best, r) => (!best || r.count > best.count ? r : best), null);
 const fmtInt = (n) => Math.round(n).toLocaleString();
 function fmtShort(n) {
   const a = Math.abs(n);
@@ -106,113 +99,7 @@ function fmtAgo(iso) {
   return `${Math.round(hours / 24)} days ago`;
 }
 
-// Dates are local "YYYY-MM-DD" keys, matching the sync script.
-function keyOf(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-function parseKey(key) {
-  const [y, m, d] = key.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-function addDays(key, n) {
-  const d = parseKey(key);
-  d.setDate(d.getDate() + n);
-  return keyOf(d);
-}
-function daysBetween(a, b) {
-  return Math.round((parseKey(b) - parseKey(a)) / 86_400_000);
-}
-function weekStart(key) {
-  const d = parseKey(key);
-  return addDays(key, -((d.getDay() + 6) % 7));
-}
 const fmtDay = (key) => parseKey(key).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-
-// ---------- model ----------
-
-function buildModel() {
-  const { history, latest } = state.data;
-  const daily = history.daily;
-  const allIds = Object.keys(history.sites).filter((id) => daily[id] && Object.keys(daily[id]).length);
-
-  // Color follows the project, fixed by all-time pageviews so filters never repaint survivors.
-  const allTime = (id) => sum(Object.values(daily[id]).map((d) => d.pageviews));
-  const ordered = [...allIds].sort((a, b) => allTime(b) - allTime(a));
-  const slots = ordered.length <= SERIES_COLORS ? SERIES_COLORS : SERIES_COLORS - 1;
-  const colorVar = {};
-  ordered.forEach((id, i) => { colorVar[id] = i < slots ? `--series-${i + 1}` : '--series-other'; });
-
-  const visible = ordered.filter((id) => !state.hidden.has(id));
-
-  const today = keyOf(new Date());
-  const allDates = allIds.flatMap((id) => Object.keys(daily[id])).sort();
-  const earliest = allDates[0] || today;
-  const wantStart = Number.isFinite(state.range) ? addDays(today, -(state.range - 1)) : earliest;
-  const start = wantStart < earliest ? earliest : wantStart;
-  const span = daysBetween(start, today) + 1;
-
-  const dates = [];
-  for (let k = start; k <= today; k = addDays(k, 1)) dates.push(k);
-
-  const weekly = span > WEEKLY_AFTER_DAYS;
-  const bucketOf = weekly ? weekStart : (k) => k;
-  const buckets = [...new Set(dates.map(bucketOf))];
-  const bucketIndex = new Map(buckets.map((b, i) => [b, i]));
-
-  const metric = (id, key, from, to) => {
-    let total = 0;
-    for (const [date, d] of Object.entries(daily[id] || {})) if (date >= from && date <= to) total += d[key];
-    return total;
-  };
-  const series = (id, key) => {
-    const out = new Array(buckets.length).fill(0);
-    for (const date of dates) {
-      const d = daily[id][date];
-      if (d) out[bucketIndex.get(bucketOf(date))] += d[key];
-    }
-    return out;
-  };
-
-  // Sorted by pageviews so the stacked chart's series order is stable; the
-  // Projects table sorts its own copy.
-  const perSite = visible.map((id) => {
-    const pageviews = metric(id, 'pageviews', start, today);
-    const visitors = metric(id, 'visitors', start, today);
-    const site = latest?.sites?.[id];
-    return {
-      id,
-      ...history.sites[id],
-      colorVar: colorVar[id],
-      pageviews,
-      visitors,
-      bandwidth: metric(id, 'bandwidth', start, today),
-      perVisitor: visitors > 0 ? pageviews / visitors : null,
-      // The four ranking fields below come from the last sync's 30-day window,
-      // which is all Netlify serves, so they do not follow the date range.
-      topPage: topRow(site?.pages),
-      topSource: topRow(site?.sources),
-      topCountry: topRow(site?.countries),
-      notFound: site?.notFound ? sum(site.notFound.map((r) => r.count)) : null,
-      latest: site,
-    };
-  }).sort((a, b) => b.pageviews - a.pageviews);
-
-  // Previous period of equal length, only when history fully covers it.
-  const prevEnd = addDays(start, -1);
-  const prevStart = addDays(start, -span);
-  const hasPrev = prevStart >= earliest;
-  const totals = (from, to) => ({
-    pageviews: sum(visible.map((id) => metric(id, 'pageviews', from, to))),
-    visitors: sum(visible.map((id) => metric(id, 'visitors', from, to))),
-    bandwidth: sum(visible.map((id) => metric(id, 'bandwidth', from, to))),
-  });
-
-  return {
-    ordered, visible, colorVar, perSite, weekly, buckets, series, span, start, earliest,
-    totals: totals(start, today),
-    prev: hasPrev ? totals(prevStart, prevEnd) : null,
-  };
-}
 
 // ---------- rendering ----------
 
@@ -353,7 +240,7 @@ function chart(id, config) {
 function renderCharts(model) {
   const surface = cssVar('--surface-1');
 
-  // Stacked pageviews: one dataset per project; past SERIES_COLORS projects the tail folds into "Other".
+  // Stacked pageviews: one dataset per project; past the last series color the tail folds into "Other".
   const groups = [];
   const other = new Array(model.buckets.length).fill(0);
   for (const s of model.perSite) {
@@ -607,6 +494,7 @@ function render() {
     ? `${total} projects · synced ${fmtAgo(latest.syncedAt)}${demo ? ' · demo data' : ''}`
     : 'Not synced yet';
 
+  $('downloadMenu').hidden = !latest;
   if (!latest) {
     $('content').hidden = true;
     $('empty').hidden = false;
@@ -616,14 +504,86 @@ function render() {
   $('empty').hidden = true;
   $('content').hidden = false;
 
-  const model = buildModel();
+  const model = buildModel(state.data, {
+    range: state.range,
+    hidden: state.hidden,
+    weeklyAfterDays: WEEKLY_AFTER_DAYS,
+  });
   renderFilters(model);
   renderKpis(model);
   renderCharts(model);
   renderTable(model);
   renderRanks(model);
   renderNotes(model);
+  renderDownloads();
 }
+
+// ---------- downloads ----------
+
+// The page already holds everything a download needs, so a file is a local
+// transform rather than another request -- and buildExport is the same one
+// `npm run export` uses, so the two produce the same document.
+function saveJson(filename, value) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
+  const a = el('a', { href: url, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadItems() {
+  const label = (RANGES.find((r) => r.days === state.range)?.label ?? rangeLabel(state.range)).toLowerCase();
+  const name = (what) => `${state.data.demo ? 'netlify-analytics-demo' : 'netlify-analytics'}-${what}-${keyOf(new Date())}.json`;
+  const hiddenCount = state.hidden.size;
+  return [
+    {
+      label: `Statistics (${label})`,
+      // Taken from the view, filters and all: a download that quietly ignored
+      // them would not be the thing on the screen.
+      note: `Totals, the projects table, every day and the top lists${hiddenCount ? `, minus the ${hiddenCount} hidden project${hiddenCount > 1 ? 's' : ''}` : ''}`,
+      file: () => name(label),
+      value: () => buildExport(state.data, {
+        range: state.range,
+        hidden: state.hidden,
+        timezone: CONFIG.timezone,
+        timezonePinned: CONFIG.timezonePinned,
+      }),
+    },
+    {
+      label: 'History (raw)',
+      note: 'Daily pageviews, visitors and bandwidth per project, every day ever synced',
+      file: () => name('history'),
+      value: () => state.data.history,
+    },
+    {
+      label: 'Last sync (raw)',
+      note: 'The rankings as Netlify returned them at the most recent sync',
+      file: () => name('latest'),
+      value: () => state.data.latest,
+    },
+  ];
+}
+
+function renderDownloads() {
+  $('downloads').replaceChildren(...downloadItems().map((item) => el('button', {
+    type: 'button',
+    onclick: () => {
+      $('downloadMenu').open = false;
+      saveJson(item.file(), item.value());
+    },
+  }, el('span', { class: 'menu-label' }, item.label), el('span', { class: 'menu-note' }, item.note))));
+}
+
+// A <details> stays open until something closes it; a menu should not outlive
+// the click that leaves it.
+document.addEventListener('click', (e) => {
+  const menu = $('downloadMenu');
+  if (menu.open && !menu.contains(e.target)) menu.open = false;
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') $('downloadMenu').open = false;
+});
 
 // ---------- data loading ----------
 
