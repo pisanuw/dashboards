@@ -21,3 +21,5 @@
 2026-11-11 [note] Projects now serve as <name>.hintwise.org (was .pisan.me); 69 of 89. No code change needed: URLs come from the site record on each sync.
 2026-11-11 [note] The analytics API intermittently answers 401 instead of 429, transiently; sync read that as "Analytics off" and reported 28 of 89 projects off when 88 were on.
 2026-11-11 [code] Sync reads Analytics on/off from the project record (analytics_instance_id), not from an HTTP status, and retries a refused request with jittered backoff.
+
+2026-11-11 [code] seed.mjs detects loss per (project, day) instead of counting distinct dates, reports both sides, and gains --merge; the old guard compared 50 days to 50 and allowed a push that dropped rows.
