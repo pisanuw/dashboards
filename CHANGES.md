@@ -23,3 +23,6 @@
 2026-11-11 [code] Sync reads Analytics on/off from the project record (analytics_instance_id), not from an HTTP status, and retries a refused request with jittered backoff.
 
 2026-11-11 [code] seed.mjs detects loss per (project, day) instead of counting distinct dates, reports both sides, and gains --merge; the old guard compared 50 days to 50 and allowed a push that dropped rows.
+
+2026-11-11 [note] Merged local history into the deployed Blobs store: 2,225 -> 2,363 project-days, recovering 138 rows the throttled syncs never wrote. Nothing dropped.
+2026-11-11 [code] A 401 now pauses every analytics request, not just the refused one, doubling per trip; retries give up on a time budget, and the run has a deadline so a throttled sync still writes.

@@ -7,7 +7,15 @@
 // See src/store.js for where those two documents actually live.
 
 import { fileURLToPath } from 'node:url';
-import { CONCURRENCY, DEMO, RANKING_LIMIT, SYNC_DAYS, getToken, selectSites } from './config.js';
+import {
+  CONCURRENCY,
+  DEMO,
+  RANKING_LIMIT,
+  SYNC_DAYS,
+  SYNC_RETRY_DEADLINE_MS,
+  getToken,
+  selectSites,
+} from './config.js';
 import { createStore } from './store.js';
 import { createNetlifyClient } from './netlify.js';
 import { createMockClient } from './mock.js';
@@ -16,8 +24,8 @@ const DAY = 86_400_000;
 
 export const EMPTY_HISTORY = { sites: {}, daily: {} };
 
-export function createClient() {
-  return DEMO ? createMockClient() : createNetlifyClient(getToken());
+export function createClient({ runDeadline = null } = {}) {
+  return DEMO ? createMockClient() : createNetlifyClient(getToken(), { runDeadline });
 }
 
 // Local UTC offset in the "+HHMM" form the analytics API expects.
@@ -55,16 +63,24 @@ async function fetchSite(client, siteId, window) {
   const { from, to, timezone } = window;
   const q = (extra) => ({ from, to, timezone, ...extra });
   const limit = RANKING_LIMIT;
-  const [pageviews, visitors, bandwidth, uniques, pages, sources, countries, notFound] = await Promise.all([
-    client.analytics(siteId, 'pageviews', q({ resolution: 'day' })),
-    client.analytics(siteId, 'visitors', q({ resolution: 'day' })),
-    client.analytics(siteId, 'bandwidth', q({ resolution: 'day' })),
-    client.analytics(siteId, 'visitors', q({ resolution: 'range' })),
-    client.analytics(siteId, 'ranking/pages', q({ limit })),
-    client.analytics(siteId, 'ranking/sources', q({ limit })),
-    client.analytics(siteId, 'ranking/countries', q({ limit })),
-    client.analytics(siteId, 'ranking/not_found', q({ limit })),
-  ]);
+  const wanted = [
+    ['pageviews', { resolution: 'day' }],
+    ['visitors', { resolution: 'day' }],
+    ['bandwidth', { resolution: 'day' }],
+    ['visitors', { resolution: 'range' }],
+    ['ranking/pages', { limit }],
+    ['ranking/sources', { limit }],
+    ['ranking/countries', { limit }],
+    ['ranking/not_found', { limit }],
+  ];
+  // One endpoint at a time, not Promise.all. Eight at once per project times
+  // CONCURRENCY projects is a 32-request spike, and the spike is what trips the
+  // throttle; this keeps the requests in flight down to CONCURRENCY. It costs
+  // wall-clock on a healthy run and buys a run that finishes at all on a
+  // throttled one.
+  const answers = [];
+  for (const [endpoint, extra] of wanted) answers.push(await client.analytics(siteId, endpoint, q(extra)));
+  const [pageviews, visitors, bandwidth, uniques, pages, sources, countries, notFound] = answers;
 
   const pv = seriesByDate(pageviews);
   const vis = seriesByDate(visitors);
@@ -94,13 +110,16 @@ async function mapLimit(items, limit, fn) {
 }
 
 export async function sync({
-  client = createClient(),
+  client,
   store,
   days = SYNC_DAYS,
   log = console.log,
 } = {}) {
   const target = store ?? (await createStore());
   const now = new Date();
+  // Built here rather than in the default parameter so it can carry the run's
+  // own deadline, which is only known once the run has a start time.
+  client ||= createClient({ runDeadline: now.getTime() + SYNC_RETRY_DEADLINE_MS });
   const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
   const window = { from: startOfToday.getTime() - (days - 1) * DAY, to: now.getTime(), timezone: tzOffset(now) };
@@ -154,8 +173,15 @@ export async function sync({
 
   const ok = Object.values(latest.sites).filter((s) => s.status === 'ok').length;
   const failed = Object.values(latest.sites).filter((s) => s.status === 'error').length;
-  const { retries = 0, retriedRequests = 0 } = client.stats || {};
-  if (retries) log(`Throttled: ${retriedRequests} request(s) retried, ${retries} retr${retries === 1 ? 'y' : 'ies'} in total.`);
+  const { retries = 0, retriedRequests = 0, throttle } = client.stats || {};
+  // Recorded on the document, not only logged: the last run's throttling is
+  // what explains a project missing from the dashboard, and digging it out of
+  // function logs afterwards does not work -- they do not keep the output.
+  latest.throttle = { retries, retriedRequests, ...throttle };
+  if (retries || throttle?.trips) {
+    log(`Throttled: ${throttle?.trips || 0} pause(s), ${Math.round((throttle?.pausedMs || 0) / 1000)}s waiting in total, ` +
+      `${retriedRequests} request(s) retried.`);
+  }
   log(
     `Done: ${ok}/${sites.length - withAnalyticsOff} sites with analytics read` +
     `${withAnalyticsOff ? `, ${withAnalyticsOff} with Analytics off` : ''}` +

@@ -63,11 +63,27 @@ export const STALE_MINUTES = num('STALE_MINUTES', 60);
 // Sites fetched at once. Each site costs 8 analytics requests.
 export const CONCURRENCY = num('CONCURRENCY', 4);
 // The analytics service intermittently refuses a request with 401 (see
-// src/netlify.js), so a request is retried with jittered exponential backoff
-// before it counts as a failure. Four retries off a 500ms base spans up to
-// ~7.5s of waiting per request, well inside the background function's budget.
-export const ANALYTICS_RETRIES = num('ANALYTICS_RETRIES', 4);
-export const ANALYTICS_RETRY_BASE_MS = num('ANALYTICS_RETRY_BASE_MS', 500);
+// src/netlify.js), so a refused request is retried rather than counted as a
+// failure. It waits on the shared throttle pause below, not on a backoff of its
+// own, and gives up on a time budget: while the service is refusing every
+// caller, a request can see several refusals through no fault of its own, and
+// counting those as its own strikes loses projects. ANALYTICS_RETRIES is only a
+// backstop against a tight failure loop.
+export const ANALYTICS_RETRIES = num('ANALYTICS_RETRIES', 20);
+export const ANALYTICS_RETRY_BUDGET_MS = num('ANALYTICS_RETRY_BUDGET_MS', 90_000);
+// When the whole run has spent this long, nothing is retried any more, so the
+// sync still finishes and writes. A background function gets 15 minutes and
+// stores nothing if it is killed, so stopping at 10 and recording some projects
+// as errors beats being cut off with everything unwritten.
+export const SYNC_RETRY_DEADLINE_MS = num('SYNC_RETRY_DEADLINE_MS', 600_000);
+// How long every request pauses after the service refuses one, doubling per
+// trip up to the maximum. A per-request backoff alone was not enough: four
+// retries spanning ~7.5s all landed inside a pause the service was still
+// enforcing, so the whole sync now waits together. The background function has
+// 15 minutes and an unthrottled pass takes under a minute, so there is room to
+// wait.
+export const ANALYTICS_THROTTLE_PAUSE_MS = num('ANALYTICS_THROTTLE_PAUSE_MS', 2000);
+export const ANALYTICS_THROTTLE_MAX_PAUSE_MS = num('ANALYTICS_THROTTLE_MAX_PAUSE_MS', 60_000);
 // How many rows to keep per ranking (top pages, sources, countries, 404s).
 export const RANKING_LIMIT = num('RANKING_LIMIT', 100);
 
