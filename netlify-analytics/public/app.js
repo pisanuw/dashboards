@@ -466,7 +466,9 @@ function renderRanks(model) {
 
 function renderNotes(model) {
   const sites = Object.values(state.data.latest?.sites || {});
-  const skipped = sites.filter((s) => s.status === 'no-analytics').map((s) => s.name);
+  // 'no-analytics' now comes from the site record rather than being guessed
+  // from a failed request, so this can be stated rather than hedged.
+  const analyticsOff = sites.filter((s) => s.status === 'no-analytics').map((s) => s.name);
   const errors = sites.filter((s) => s.status === 'error');
   const notes = [];
   if (model.earliest > addDays(keyOf(new Date()), -(state.range - 1)) && Number.isFinite(state.range)) {
@@ -482,7 +484,7 @@ function renderNotes(model) {
       notes.push(`Days are counted in ${CONFIG.timezone}, the server\u2019s own setting. Pin TZ to keep that stable across machines.`);
     }
   }
-  if (skipped.length) notes.push(`No analytics data (Analytics not enabled?): ${skipped.join(', ')}`);
+  if (analyticsOff.length) notes.push(`Analytics is off, so these are not counted: ${analyticsOff.join(', ')}`);
   for (const e of errors) notes.push(`Error syncing ${e.name}: ${e.error}`);
   $('notes').replaceChildren(...notes.map((n) => el('p', {}, n)));
 }

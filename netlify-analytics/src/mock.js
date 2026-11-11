@@ -65,6 +65,9 @@ export function createMockClient() {
       name: s.name,
       url: `https://${s.name}.netlify.app`,
       adminUrl: `https://app.netlify.com/sites/${s.name}`,
+      // A project with no traffic in this mock stands for one with Analytics
+      // off, so the demo exercises the skip path too.
+      analyticsInstanceId: s.base ? `instance-${s.id}` : null,
     }));
   }
 

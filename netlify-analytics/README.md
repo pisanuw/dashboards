@@ -263,6 +263,15 @@ is a UI trip, so the command says so before it acts.
   (`analytics.services.netlify.com/v2/<site_id>/...`). Netlify does not support it and it
   may change; `npm run check` is the quickest way to see whether it still works.
 - Projects without Analytics enabled are listed at the bottom of the dashboard and skipped.
+  Whether Analytics is on is read from the project record (`analytics_instance_id`), never
+  inferred from how the analytics API answers -- see the next point for why.
+- The analytics API intermittently refuses a request with **401** rather than 429, with no
+  `Retry-After`, and the same request then succeeds seconds later. Each request is retried
+  with jittered backoff (`ANALYTICS_RETRIES`). This matters because a 401 used to be read as
+  "Analytics is off": on 2026-11-11 the nightly sync reported 28 of 89 projects as having
+  Analytics off when 88 of them had it on. What triggers the refusal is not established --
+  it is not request volume, and the scheduled run on Netlify hits it far more often than a
+  laptop run does.
 - "Visitors" is the sum of each project's daily unique visitors, so one person visiting two
   projects (or on two days) counts twice.
 - Rankings (pages, sources, countries, 404s) always reflect the last 30 days as of the

@@ -62,6 +62,12 @@ export const SYNC_DAYS = num('SYNC_DAYS', 30);
 export const STALE_MINUTES = num('STALE_MINUTES', 60);
 // Sites fetched at once. Each site costs 8 analytics requests.
 export const CONCURRENCY = num('CONCURRENCY', 4);
+// The analytics service intermittently refuses a request with 401 (see
+// src/netlify.js), so a request is retried with jittered exponential backoff
+// before it counts as a failure. Four retries off a 500ms base spans up to
+// ~7.5s of waiting per request, well inside the background function's budget.
+export const ANALYTICS_RETRIES = num('ANALYTICS_RETRIES', 4);
+export const ANALYTICS_RETRY_BASE_MS = num('ANALYTICS_RETRY_BASE_MS', 500);
 // How many rows to keep per ranking (top pages, sources, countries, 404s).
 export const RANKING_LIMIT = num('RANKING_LIMIT', 100);
 

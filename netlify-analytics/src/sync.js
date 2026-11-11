@@ -115,9 +115,26 @@ export async function sync({
   history.daily ??= {};
   const latest = { syncedAt: now.toISOString(), from: window.from, to: window.to, days, sites: {} };
 
+  let withAnalyticsOff = 0;
   await mapLimit(sites, CONCURRENCY, async (site) => {
     const meta = { name: site.name, url: site.url, adminUrl: site.adminUrl };
     history.sites[site.id] = meta;
+
+    // Whether a project has Analytics on is a property of the site record --
+    // the API sets analytics_instance_id when the add-on is provisioned -- not
+    // something to infer from how the analytics service answers. Inferring it
+    // from a 401 filed throttled projects as "Analytics off", which is both
+    // wrong on the dashboard and silent: 28 of 89 projects were reported off on
+    // 2026-11-11 while 88 of them had it on. Checking the field also saves the
+    // 8 requests a project with Analytics off would otherwise spend, which is 8
+    // fewer chances to trip the throttle for everyone else.
+    if (!site.analyticsInstanceId) {
+      latest.sites[site.id] = { ...meta, status: 'no-analytics' };
+      withAnalyticsOff++;
+      log(`  off      ${site.name}: Analytics is not enabled`);
+      return;
+    }
+
     try {
       const result = await fetchSite(client, site.id, window);
       history.daily[site.id] = { ...history.daily[site.id], ...result.daily };
@@ -125,10 +142,10 @@ export async function sync({
       latest.sites[site.id] = { ...meta, status: 'ok', ...rankings };
       log(`  ok       ${site.name}`);
     } catch (err) {
-      // 401/403/404 from the analytics service usually means Analytics is not enabled for the site.
-      const disabled = [401, 403, 404].includes(err.status);
-      latest.sites[site.id] = { ...meta, status: disabled ? 'no-analytics' : 'error', error: err.message };
-      log(`  ${disabled ? 'skipped ' : 'ERROR   '} ${site.name}: ${err.message}`);
+      // Analytics is on for this project, so a failure here is a failure to
+      // read it -- a real error to surface, never a quiet "no analytics".
+      latest.sites[site.id] = { ...meta, status: 'error', error: err.message };
+      log(`  ERROR    ${site.name}: ${err.message}`);
     }
   });
 
@@ -136,7 +153,14 @@ export async function sync({
   await target.write('latest', latest);
 
   const ok = Object.values(latest.sites).filter((s) => s.status === 'ok').length;
-  log(`Done: ${ok}/${sites.length} sites with analytics. Data in ${target.describe()}`);
+  const failed = Object.values(latest.sites).filter((s) => s.status === 'error').length;
+  const { retries = 0, retriedRequests = 0 } = client.stats || {};
+  if (retries) log(`Throttled: ${retriedRequests} request(s) retried, ${retries} retr${retries === 1 ? 'y' : 'ies'} in total.`);
+  log(
+    `Done: ${ok}/${sites.length - withAnalyticsOff} sites with analytics read` +
+    `${withAnalyticsOff ? `, ${withAnalyticsOff} with Analytics off` : ''}` +
+    `${failed ? `, ${failed} FAILED` : ''}. Data in ${target.describe()}`,
+  );
   return latest;
 }
 

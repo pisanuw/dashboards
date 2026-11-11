@@ -16,3 +16,8 @@
 2026-11-02 [code] Statistics export as JSON: `npm run export` writes to data/exports/, and a Download button in the dashboard saves the same document plus the two raw store files.
 2026-11-02 [decision] The export's numbers come from public/stats.js, extracted out of app.js's buildModel so the page and the export compute them once; a second implementation would drift from the screen it claims to describe.
 2026-11-02 [note] Exports default into DATA_DIR, which is gitignored: they carry traffic data for every project in the account and the repo is public.
+
+2026-11-11 [note] Netlify Analytics is on for 88/89 projects; only pisan-analytics (the dashboard itself) is off. Pro plan, so Analytics costs nothing per project.
+2026-11-11 [note] Projects now serve as <name>.hintwise.org (was .pisan.me); 69 of 89. No code change needed: URLs come from the site record on each sync.
+2026-11-11 [note] The analytics API intermittently answers 401 instead of 429, transiently; sync read that as "Analytics off" and reported 28 of 89 projects off when 88 were on.
+2026-11-11 [code] Sync reads Analytics on/off from the project record (analytics_instance_id), not from an HTTP status, and retries a refused request with jittered backoff.
