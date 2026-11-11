@@ -168,16 +168,20 @@ export async function sync({
     }
   });
 
+  const { retries = 0, retriedRequests = 0, throttle } = client.stats || {};
+  // Recorded on the document, not only logged: the last run's throttling is
+  // what explains a project missing from the dashboard, and digging it out of
+  // function logs afterwards does not work -- they do not keep the output.
+  // Set before the write, or the store gets a document without it -- which is
+  // what shipped on 2026-11-11 and left a clean deployed run indistinguishable
+  // from one that had been throttled all the way through.
+  latest.throttle = { retries, retriedRequests, ...throttle };
+
   await target.write('history', history);
   await target.write('latest', latest);
 
   const ok = Object.values(latest.sites).filter((s) => s.status === 'ok').length;
   const failed = Object.values(latest.sites).filter((s) => s.status === 'error').length;
-  const { retries = 0, retriedRequests = 0, throttle } = client.stats || {};
-  // Recorded on the document, not only logged: the last run's throttling is
-  // what explains a project missing from the dashboard, and digging it out of
-  // function logs afterwards does not work -- they do not keep the output.
-  latest.throttle = { retries, retriedRequests, ...throttle };
   if (retries || throttle?.trips) {
     log(`Throttled: ${throttle?.trips || 0} pause(s), ${Math.round((throttle?.pausedMs || 0) / 1000)}s waiting in total, ` +
       `${retriedRequests} request(s) retried.`);

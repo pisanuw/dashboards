@@ -485,6 +485,16 @@ function renderNotes(model) {
     }
   }
   if (analyticsOff.length) notes.push(`Analytics is off, so these are not counted: ${analyticsOff.join(', ')}`);
+  // Said here rather than left in the stored document, because a throttled sync
+  // is the explanation for the errors listed below it, and a reader who cannot
+  // see that the service was refusing everyone will read them as 89 unrelated
+  // faults.
+  const t = state.data.latest?.throttle;
+  if (t?.trips) {
+    notes.push(`The analytics service was refusing requests during the last sync: ` +
+      `${t.trips} pause(s), ${Math.round((t.pausedMs || 0) / 1000)}s spent waiting, ` +
+      `${t.retriedRequests || 0} request(s) retried.`);
+  }
   for (const e of errors) notes.push(`Error syncing ${e.name}: ${e.error}`);
   $('notes').replaceChildren(...notes.map((n) => el('p', {}, n)));
 }
