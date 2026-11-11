@@ -27,3 +27,4 @@
 2026-11-11 [note] Merged local history into the deployed Blobs store: 2,225 -> 2,363 project-days, recovering 138 rows the throttled syncs never wrote. Nothing dropped.
 2026-11-11 [code] A 401 now pauses every analytics request, not just the refused one, doubling per trip; retries give up on a time budget, and the run has a deadline so a throttled sync still writes.
 2026-11-11 [code] Throttle stats were set on `latest` after it was written, so the store never got them; set before the write, and shown on the dashboard instead of only in /api/data.
+2026-11-11 [note] Deployed runs 11:33 and 11:44 UTC: 88/88 read, throttle stats all zero -- no 401s at all, so the shared gate is deployed but has never yet been exercised in production.
